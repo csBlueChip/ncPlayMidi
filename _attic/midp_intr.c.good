@@ -1,0 +1,197 @@
+#include "midp_play.h"
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#if PLATFORM == PLATFORM_PC
+//+============================================================================ ========================================
+// Linux PC interrupt timer
+//
+#include <signal.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <assert.h>
+
+static    uint32_t        uspdt;    // the interrupt needs to know this
+volatile  delta_t*        pDelta;   // pointer to the track delta we are using
+static    float           deltaF;   // we track the delta as a float
+
+static    struct timeval  tv[2];    // best chance at accurate delta timing :/
+static    int             tvi = 0;  // 'last' and 'now'
+
+//+============================================================================ ========================================
+// Interrupt handler
+//
+static
+void  intrHandler (int signal)
+{
+	(void)signal;
+
+	gettimeofday(&tv[tvi = !tvi], NULL);
+
+	float  tick = (float)(((tv[ tvi].tv_sec * 1000000) + tv[ tvi].tv_usec) - 
+	                      ((tv[!tvi].tv_sec * 1000000) + tv[!tvi].tv_usec)  ) / uspdt ;
+
+	*pDelta = (delta_t)(deltaF += tick);
+
+	write(2, ".", 1);  // 1 dot to 2=stderr (stdout is 1)
+}
+
+//+============================================================================ ========================================
+// Initialise the timer interrupt
+//
+bool  intrInit (void)
+{
+	sigset_t          block;
+	struct sigaction  act   = { .sa_handler = intrHandler };
+
+	sigemptyset(&block);
+	sigaddset(&block, SIGALRM);
+
+	sigemptyset(&act.sa_mask);
+
+	return !sigaction(SIGALRM, &act, NULL);
+}
+
+//+============================================================================ ========================================
+// Start the timer interrupt
+//
+bool  intrStart (smf_t* pSmf)
+{
+	pSmf->uspdt = ((60 * 1000000) / BPM_DEFAULT) / pSmf->mthd->tpqn;
+	
+	pSmf->delta = (delta_t)(deltaF = 0.0);
+	pDelta      = &pSmf->delta;
+
+	gettimeofday(&tv[tvi = 0], NULL);
+	
+	return intrPeriod(pSmf->uspdt);
+}
+
+//+============================================================================ ========================================
+// Set interrupt period to 1 delta tick
+//
+bool  intrPeriod (uint32_t us)
+{
+	struct itimerval  period = {  // fire as fast as possible (10mS on my machine)
+		.it_interval.tv_sec = 0,  .it_interval.tv_usec = us, 
+		.it_value.tv_sec    = 0,  .it_value.tv_usec    = us
+	};
+	
+	return (uspdt = us), !setitimer(ITIMER_REAL, &period, NULL);
+}
+
+//+============================================================================ ========================================
+// Pause the timer interrupt
+//
+bool  intrPause (smf_t* pSmf)
+{
+	return intrPeriod(0);
+}
+
+//+============================================================================ ========================================
+// Continue the timer interrupt
+//
+bool  intrCont (smf_t* pSmf)
+{
+	gettimeofday(&tv[tvi = 0], NULL);
+	return intrPeriod(pSmf->uspdt);
+}
+
+//+============================================================================ ========================================
+// Stop the timer interrupt
+//
+void  intrStop (smf_t* pSmf)
+{
+	pSmf->uspdt = 0;
+	intrPeriod(0);
+
+	pSmf->delta = 0;
+	pDelta      = NULL;
+}
+#endif//PLATFORM_PC
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#if PLATFORM == PLATFORM_XXX
+//+============================================================================ ========================================
+// Template interrupt timer
+//
+volatile  delta_t*        pDelta;   // pointer to the track delta we are using
+
+//+============================================================================ ========================================
+// Interrupt handler
+//
+static
+void  intrHandler (int signal)
+{
+	(void)signal;
+	(*pDelta)++;
+}
+
+//+============================================================================ ========================================
+// Initialise the timer interrupt
+//
+bool  intrInit (void)
+{
+	~~~[ INITIALISE(hardware) ]~~~
+
+	return true;
+}
+
+//+============================================================================ ========================================
+// Stop the timer interrupt
+//
+bool  intrKill (void)
+{
+	intrStop();
+	pDelta = NULL;
+
+	~~~[ RELEASE(hardware) ]~~~
+	
+	return true;
+}
+
+//+============================================================================ ========================================
+// Start the timer interrupt
+//
+bool  intrStart (smf_t* pSmf)
+{
+	pSmf->uspdt = ((60 * 1000000) / BPM_DEFAULT) / pSmf->mthd->tpqn;
+	
+	pSmf->delta = 0;
+	pDelta      = &pSmf->delta;
+
+	return intrPeriod(pSmf->uspdt);
+}
+
+//+============================================================================ ========================================
+// Set interrupt period for 1 delta tick (specified in microSeconds 0.000'001)
+//
+bool  intrPeriod (smf_t* pSmf)
+{
+	~~~[ SET_INTERRUPT_PERIOD(pSmf->uspdt) ]~~~
+	
+	return true;
+}
+
+//+============================================================================ ========================================
+// Stop the timer interrupt
+//
+bool  intrStop (void)
+{
+	~~~[ STOP_INTERRUPTS() ]~~~
+
+	return true;
+}
+
+//+============================================================================ ========================================
+// Restart the timer interrupt
+//
+bool  intrCont (smf_t* pSmf)
+{
+	intrPeriod(pSmf->uspdt);
+
+	return true;
+}
+
+#endif//PLATFORM_XXX
